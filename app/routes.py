@@ -76,18 +76,18 @@ def update_embeddings():
 
     for kb in kb_list:
         # Get dataframe from Carol storage
-        logger.debug(f'Loading documents from {kb}.')
+        logger.info(f'Loading documents from {kb}.')
         try:
             df_tmp = storage.load(kb, format='pickle', cache=False)
             df_tmp["database"] = kb
 
             kb_datasets.append(df_tmp)
-            logger.debug('Done')
         except Exception as e:
-            logger.debug(f'Failed to load {kb}. Discarding.')
+            logger.warn(f'Failed to load {kb}. Discarding.')
 
     # Update dataframe after it has been loaded from Carol storage
     df = pd.concat(kb_datasets, ignore_index=False)
+    return kb_list
 
 
 def findMatches(title, query_tokens, scale):
@@ -181,13 +181,13 @@ def get_similar_questions(model, sentence_embeddings_df, query, threshold, thres
     query = transformSentences(query, custom_stopwords)
 
     if keywordsearch_flag:
-        logger.debug('Trying keyword search on title.')
+        logger.info(f'Trying keyword search on \"{query}\".')
         keywordResults = keywordSearch(kb=sentence_embeddings_df, q=query, threshold=1)
 
     else: 
         keywordResults = pd.DataFrame(columns=sentence_embeddings_df.columns)
 
-    logger.debug('Trying semantic search.')
+    logger.info(f'Trying semantic search on \"{query}\".')
     semanticResults = sentence_embeddings_df.copy()
     query_vec = model.encode([query], convert_to_tensor=True)
     torch_l = [torch.from_numpy(v) for v in semanticResults['embeddings'].values]
@@ -202,7 +202,7 @@ def get_similar_questions(model, sentence_embeddings_df, query, threshold, thres
                                                             ((semanticResults['sentence_source'] == sentence_source_value) &
                                                             (semanticResults['score'] >= custom_threshold_value/100))]
 
-    logger.debug('Merging search results.')
+    logger.debug(f'Merging {keywordResults.shape[0]} semantic to {semanticResults.shape[0]} keyword results.')
     if (len(keywordResults) > 0) and (keywordResults["score"].mean() == 1.0) and hasCode(query):
         # if there is any exact match on keywords, ignore semantic search
         results = keywordResults.copy()
@@ -213,6 +213,7 @@ def get_similar_questions(model, sentence_embeddings_df, query, threshold, thres
     if (len(results) < 1):
         # Tries reverse keyword search as the last resource
         results = reverseKeywordSearch(kb=sentence_embeddings_df, q=query)
+        logger.info(f'Reverse keyword search applied as no result has been found so far. Retrieved articles: \"{results.shape[0]}\".')
 
     results.drop(columns=['embeddings'], inplace=True)
     results.sort_values(by=['score'], inplace=True, ascending=False)
@@ -228,14 +229,19 @@ df = None
 model = None
 keywordsearch_flag = False
 
-logger.debug('App started. Please, make sure you load the model and knowledge base before you start.')
+logger.info('App started. Please, make sure you load the model and knowledge base before you start.')
 
 # Get files from Carol storage
 #update_embeddings()
 
 @server_bp.route('/', methods=['GET'])
 def ping():
-    return jsonify('App is running. Send a request to /query for document searching or to /update_embeddings to update the document embeddings.')
+    return jsonify('App is running. Available routes are: \
+    <p>     - /query: Send a request to /query for document searching.\
+    <p>     - /validate: Validate the similarity between a given query and expected documents.\
+    <p>     - /update_embeddings: Update the document embeddings as defined on settings.\
+    <p>     - /load_model: Loads NLP model defined on settings.\
+    <p>     - /switch_keywordsearch: Enable / disable keyword search.')
 
 # Alows to enable/ disable keyword search on run time
 @server_bp.route('/switch_keywordsearch', methods=['GET'])
@@ -243,6 +249,7 @@ def switch_keywordsearch():
     global keywordsearch_flag
 
     keywordsearch_flag = not keywordsearch_flag
+    logger.info(f'Keyword search switch set to: {keywordsearch_flag}.')
     return jsonify(f'Keyword search switch set to: {keywordsearch_flag}.')
 
 @server_bp.route('/load_model', methods=['GET'])
@@ -261,7 +268,7 @@ def load_model():
 
     if model_storage_file:
         name = model_storage_file
-        logger.debug(f'Loading model {name}. Using GPU: {gpu}.')
+        logger.info(f'Loading model {name}. Using GPU: {gpu}.')
         storage = Storage(login)
         model = storage.load(model_storage_file, format='pickle', cache=False)
 
@@ -274,16 +281,15 @@ def load_model():
         
     else:
         name = model_sentencetransformers
-        logger.debug(f'Loading model {name}. Using GPU: {gpu}.')
+        logger.info(f'Loading model {name}. Using GPU: {gpu}.')
         model = SentenceTransformer(model_sentencetransformers)
 
     return jsonify(f'Model {name} loaded.')
 
 @server_bp.route('/update_embeddings', methods=['GET'])
 def update_embeddings_route():
-    logger.debug('Updating embeddings.')
-    update_embeddings()
-    return jsonify('Embeddings are updated.')
+    kb_list = update_embeddings()
+    return jsonify(f'Embeddings are updated. The following knowledgebases have been loaded from the storage: {kb_list}.')
 
 # Route to be used for validation purposes. The user can send
 # a query and expected results, the response will be the top
@@ -303,16 +309,24 @@ def validate():
     expected_ids = args['expected_ids']
     expected_ids = [int(i) for i in expected_ids]
 
+    logger.info(f'Validating query \"{query}\" against target IDS {expected_ids}.')
+
     df_tmp = df[df["id"].isin(expected_ids)].copy()
     if len(df_tmp) > 0:
-        logger.debug(f'Validating query {query} against the following articles: {expected_ids}')
-        results_df, total_matches = get_similar_questions(model, df_tmp, query, threshold=0.0, threshold_custom=None, k=500, validation=True)
+        logger.info(f'Validating query {query} against the following articles: {expected_ids}')
+        results_df, total_matches = get_similar_questions(model=model, 
+                                                          sentence_embeddings_df=df_tmp, 
+                                                          query=query, threshold=0.0, 
+                                                          threshold_custom=None, 
+                                                          k=500, 
+                                                          validation=True)
 
         records_dict_tmp = results_df.to_dict('records')
         records_dict = sorted(records_dict_tmp, key=operator.itemgetter('score'), reverse=True)
     else:
         records_dict, total_matches = ([], 0)
 
+    logger.info(f'Returning validation results.')
     return jsonify({'total_matches': total_matches, 'topk_results': records_dict})
     
 @server_bp.route('/query', methods=['POST'])
@@ -320,11 +334,11 @@ def query():
     t0 = time()
 
     if model is None:
-        logger.debug(f'It looks like the NLP model has not been loaded yet. This operation usually takes up to 1 minute.')
+        logger.warn(f'It looks like the NLP model has not been loaded yet. This operation usually takes up to 1 minute.')
         load_model()
 
     if df is None:
-        logger.debug(f'It looks like the knowledge base has not been loaded yet. This operation usually takes up to 1 minute.')
+        logger.warn(f'It looks like the knowledge base has not been loaded yet. This operation usually takes up to 1 minute.')
         update_embeddings()
 
     query_arg = {
@@ -343,7 +357,6 @@ def query():
     }
     args = parser.parse(query_arg, request)
     query = args['query']
-    logger.debug(query)
     threshold = args['threshold']
     k = args['k']
     filters = args['filters']
@@ -351,30 +364,29 @@ def query():
     threshold_custom = args.get('threshold_custom')
     df_tmp = df.copy()
 
-    logger.debug('Consolidating thresholds.')
     # If there's a custom threshold defined it overcomes the general threshold
     if threshold_custom:
+        logger.info('Consolidating thresholds.')
         # If there's no "all" key on custom threshold, sets it to the general threshold provided (or default)
         if "all" not in threshold_custom:
             threshold_custom["all"] = threshold
         threshold = threshold_custom
 
-    logger.debug(f'Running filter on {len(df_tmp)} articles.')
+    logger.info(f'Running filter on {len(df_tmp)} articles.')
 
     # Expceting filters to be passed as a list of dicts as in the example below:
     #     [{'filter_field': 'modulo', 'filter_value': "ARQUIVO SIGAFIS"}] 
+    if filters in ("", None): filters = []
     for filter in filters:
         if df_tmp.empty:
             break
         
         filter_field, filter_value = (filter.get('filter_field'), filter.get('filter_value'))
-        logger.debug(f'Applying filter \"{filter_field}\" == \"{filter_value}\".')
+        logger.info(f'Applying filter \"{filter_field}\" == \"{filter_value}\".')
 
         filter_field_type = df_tmp.iloc[0][filter_field]
 
         if isinstance(filter_field_type, list) and isinstance(filter_value, list) and filter_value:
-            logger.debug(f'Processing list to list filter.')
-
             tmp_dfs = []
             for value in filter_value:
                 value = value.lower()
@@ -386,28 +398,29 @@ def query():
                 df_tmp = final_df
 
         elif isinstance(filter_field_type, str) and isinstance(filter_value, list):
-            logger.debug(f'Processing string to list filter.')
             df_tmp = df_tmp[df_tmp[filter_field].isin(filter_value)]
 
         else:
-            logger.debug(f'Processing string to string filter.')
             df_tmp = df_tmp[df_tmp[filter_field] == filter_value]
 
     if not df_tmp.empty:
-        logger.debug(f'Total records satisfying the filter: {len(df_tmp)}.')
+        logger.info(f'Total records satisfying the filter: {len(df_tmp)}.')
 
     else:
         logger.warn(f'No results returned from filter.')
         return jsonify({'total_matches': 0, 'topk_results': []})
 
-    results_df, total_matches = get_similar_questions(model, df_tmp, query, threshold, k)
+    results_df, total_matches = get_similar_questions(model=model, 
+                                                      sentence_embeddings_df=df_tmp, 
+                                                      query=query, 
+                                                      threshold=threshold, 
+                                                      k=k)
 
     if len(results_df) < 1:
         logger.warn(f'Unable to find any similar article for the threshold {threshold}.')
         return jsonify({'total_matches': 0, 'topk_results': []})
 
     if response_columns:
-        logger.debug('Filtering results columns.')
         results_df = results_df[list(set(response_columns + ['score', 'sentence_source']))]
 
     records_dict_tmp = results_df.to_dict('records')
@@ -427,7 +440,6 @@ def handle_error(err):
         return jsonify(messages), err.code
 
 def validate_filter(val):
-    logger.debug('Validating filter')
     filter_columns = []
     filters = list(val)
     for filter in filters:
@@ -441,14 +453,12 @@ def validate_filter(val):
 
 
 def validate_response_columns(val):
-    logger.debug('Validating response columns')
     response_columns = list(val)
     if response_columns and any(c not in df.columns for c in response_columns):
         raise ValidationError("One or more columns that you are trying to return does not exist in the documents base.")
 
 
 def validate_threshold_custom(val):
-    logger.debug('Validating custom threshold')
     if 'sentence_source' not in df.columns:
         raise ValidationError("The sentence_source column does not exist in the documents base so it will not be possible to filter the custom threshold.")
     sentence_source_values = list(df['sentence_source'].unique()) + ["all"]
