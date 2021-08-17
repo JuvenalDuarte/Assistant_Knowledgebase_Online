@@ -170,7 +170,7 @@ def hasCode(txt):
     if pattern1.match(txt) or pattern2.match(txt) or pattern3.match(txt) or pattern4.match(txt): return True
     else: return False
 
-def get_similar_questions(model, sentence_embeddings_df, query, threshold, threshold_custom, k, validation=False):
+def get_similar_questions(model, sentence_embeddings_df, query, threshold=None, k=None, validation=False):
     global keywordsearch_flag
 
     # Reading stopwords to be removed
@@ -194,13 +194,6 @@ def get_similar_questions(model, sentence_embeddings_df, query, threshold, thres
     sentence_embeddings = torch.stack(torch_l, dim=0)
     score = util.pytorch_cos_sim(query_vec, sentence_embeddings)
     semanticResults['score'] = list(score.cpu().detach().numpy()[-1,:])
-    semanticResults = semanticResults[semanticResults['score'] >= threshold/100]
-    if threshold_custom and not semanticResults.empty:
-        for sentence_source_value, custom_threshold_value in threshold_custom.items():
-            custom_threshold_value = int(custom_threshold_value)
-            semanticResults = semanticResults[(semanticResults['sentence_source'] != sentence_source_value) |
-                                                            ((semanticResults['sentence_source'] == sentence_source_value) &
-                                                            (semanticResults['score'] >= custom_threshold_value/100))]
 
     logger.debug(f'Merging {keywordResults.shape[0]} semantic to {semanticResults.shape[0]} keyword results.')
     if (len(keywordResults) > 0) and (keywordResults["score"].mean() == 1.0) and hasCode(query):
@@ -215,11 +208,35 @@ def get_similar_questions(model, sentence_embeddings_df, query, threshold, thres
         results = reverseKeywordSearch(kb=sentence_embeddings_df, q=query)
         logger.info(f'Reverse keyword search applied as no result has been found so far. Retrieved articles: \"{results.shape[0]}\".')
 
+    # Applying threshold if defined
+    if threshold and not results.empty:
+
+        # If there is a general threshold sets it to start with. 
+        # Particular thresholds for each column will be set after the general
+        if "all" in threshold:
+
+            logger.info(f'Using general threshold {threshold["all"]} for all columns without custom threshold.')
+            results["custom_threshold"] = int(threshold["all"])
+            del threshold['all']
+            
+        else:
+            results["custom_threshold"] = None
+
+        # Setting the particular thresholds (per column)
+        for c in threshold.keys():
+
+            logger.info(f'Using {threshold[c]} threshold for {c}.')
+            results.loc[results["sentence_source"] == c, "custom_threshold"] = int(threshold[c])
+
+        results = results[results["score"] >= results["custom_threshold"] / 100].copy()
+        articlesAfterThreshold = results["id"].nunique()
+        logger.info(f'Total of {articlesAfterThreshold} articles satisfying the threshold.')
+
     results.drop(columns=['embeddings'], inplace=True)
     results.sort_values(by=['score'], inplace=True, ascending=False)
     if not validation: results.drop_duplicates(subset=['id'], inplace=True)
     total_matches = results.shape[0]
-    results = results.head(k)
+    if k: results = results.head(k)
 
     return results, total_matches
 
@@ -237,11 +254,11 @@ logger.info('App started. Please, make sure you load the model and knowledge bas
 @server_bp.route('/', methods=['GET'])
 def ping():
     return jsonify('App is running. Available routes are: \
-    <p>     - /query: Send a request to /query for document searching.\
-    <p>     - /validate: Validate the similarity between a given query and expected documents.\
-    <p>     - /update_embeddings: Update the document embeddings as defined on settings.\
-    <p>     - /load_model: Loads NLP model defined on settings.\
-    <p>     - /switch_keywordsearch: Enable / disable keyword search.')
+    \n     - /query: Send a request to /query for document searching.\
+    \n     - /validate: Validate the similarity between a given query and expected documents.\
+    \n     - /update_embeddings: Update the document embeddings as defined on settings.\
+    \n     - /load_model: Loads NLP model defined on settings.\
+    \n     - /switch_keywordsearch: Enable / disable keyword search.')
 
 # Alows to enable/ disable keyword search on run time
 @server_bp.route('/switch_keywordsearch', methods=['GET'])
@@ -316,9 +333,7 @@ def validate():
         logger.info(f'Validating query {query} against the following articles: {expected_ids}')
         results_df, total_matches = get_similar_questions(model=model, 
                                                           sentence_embeddings_df=df_tmp, 
-                                                          query=query, threshold=0.0, 
-                                                          threshold_custom=None, 
-                                                          k=500, 
+                                                          query=query,
                                                           validation=True)
 
         records_dict_tmp = results_df.to_dict('records')
@@ -365,12 +380,16 @@ def query():
     df_tmp = df.copy()
 
     # If there's a custom threshold defined it overcomes the general threshold
-    if threshold_custom:
+    if threshold_custom not in ("", None):
         logger.info('Consolidating thresholds.')
         # If there's no "all" key on custom threshold, sets it to the general threshold provided (or default)
         if "all" not in threshold_custom:
             threshold_custom["all"] = threshold
         threshold = threshold_custom
+    elif threshold not in ("", None):
+        threshold = {"all":threshold}
+    else:
+        threshold = None
 
     logger.info(f'Running filter on {len(df_tmp)} articles.')
 
