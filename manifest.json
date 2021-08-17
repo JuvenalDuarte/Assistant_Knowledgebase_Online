@@ -1,0 +1,38 @@
+{
+  "online": {
+    "processes": [
+      {
+        "name": "assistantknowledgebaseonline",
+        "algorithmName": "main",
+        "namespace": "",
+        "algorithmTitle": {
+          "pt-br": "Assistant Knowledgebase Online",
+          "en-US": "Assistant Knowledgebase Online"
+        },
+        "algorithmDescription": {
+          "pt-br": "Assistant Knowledgebase Online",
+          "en-US": "Assistant Knowledgebase Online"
+        },
+        "instanceProperties": {
+          "profile": "",
+          "properties": {
+            "dockerImage": "knowledgebaseonline/assistantknowledgebaseonline:1.0.0",
+            "instanceType": "c1.small",
+            "preemptible": false
+          }
+        }
+      }
+    ]
+  },
+  "docker": [
+    {
+      "dockerName": "assistantknowledgebaseonline",
+      "dockerTag": "1.0.0",
+      "gitBranch": "main",
+      "gitPath": "/",
+      "instanceType": "c1.small",
+      "gitDockerfileName": "Dockerfile", 
+      "gitRepoUrl": "https://github.com/JuvenalDuarte/Assistant_Knowledgebase_Online"
+    }
+  ]
+}
