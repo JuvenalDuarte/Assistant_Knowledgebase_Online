@@ -232,7 +232,7 @@ def get_similar_questions(model, sentence_embeddings_df, query, threshold=None, 
         articlesAfterThreshold = results["id"].nunique()
         logger.info(f'Total of {articlesAfterThreshold} articles satisfying the threshold.')
 
-    results.drop(columns=['embeddings'], inplace=True)
+    results.drop(columns=['sentence_embedding'], inplace=True)
     results.sort_values(by=['score'], inplace=True, ascending=False)
     if not validation: results.drop_duplicates(subset=['id'], inplace=True)
     total_matches = results.shape[0]
@@ -253,12 +253,12 @@ logger.info('App started. Please, make sure you load the model and knowledge bas
 
 @server_bp.route('/', methods=['GET'])
 def ping():
-    return jsonify('App is running. Available routes are: \
-    \n     - /query: Send a request to /query for document searching.\
-    \n     - /validate: Validate the similarity between a given query and expected documents.\
-    \n     - /update_embeddings: Update the document embeddings as defined on settings.\
-    \n     - /load_model: Loads NLP model defined on settings.\
-    \n     - /switch_keywordsearch: Enable / disable keyword search.')
+    return jsonify("App is running. Available routes are: \
+    \r\n     - /query: Send a request to /query for document searching.\
+    \r\n     - /validate: Validate the similarity between a given query and expected documents.\
+    \r\n     - /update_embeddings: Update the document embeddings as defined on settings.\
+    \r\n     - /load_model: Loads NLP model defined on settings.\
+    \r\n     - /switch_keywordsearch: Enable / disable keyword search.")
 
 # Alows to enable/ disable keyword search on run time
 @server_bp.route('/switch_keywordsearch', methods=['GET'])
