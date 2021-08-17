@@ -190,7 +190,7 @@ def get_similar_questions(model, sentence_embeddings_df, query, threshold=None, 
     logger.info(f'Trying semantic search on \"{query}\".')
     semanticResults = sentence_embeddings_df.copy()
     query_vec = model.encode([query], convert_to_tensor=True)
-    torch_l = [torch.from_numpy(v) for v in semanticResults['embeddings'].values]
+    torch_l = [torch.from_numpy(v) for v in semanticResults['sentence_embedding'].values]
     sentence_embeddings = torch.stack(torch_l, dim=0)
     score = util.pytorch_cos_sim(query_vec, sentence_embeddings)
     semanticResults['score'] = list(score.cpu().detach().numpy()[-1,:])
@@ -254,11 +254,11 @@ logger.info('App started. Please, make sure you load the model and knowledge bas
 @server_bp.route('/', methods=['GET'])
 def ping():
     return jsonify("App is running. Available routes are: \
-    \r\n     - /query: Send a request to /query for document searching.\
-    \r\n     - /validate: Validate the similarity between a given query and expected documents.\
-    \r\n     - /update_embeddings: Update the document embeddings as defined on settings.\
-    \r\n     - /load_model: Loads NLP model defined on settings.\
-    \r\n     - /switch_keywordsearch: Enable / disable keyword search.")
+    \\r\\n     - /query: Send a request to /query for document searching.\
+    \\r\\n     - /validate: Validate the similarity between a given query and expected documents.\
+    \\r\\n     - /update_embeddings: Update the document embeddings as defined on settings.\
+    \\r\\n     - /load_model: Loads NLP model defined on settings.\
+    \\r\\n     - /switch_keywordsearch: Enable / disable keyword search.")
 
 # Alows to enable/ disable keyword search on run time
 @server_bp.route('/switch_keywordsearch', methods=['GET'])
