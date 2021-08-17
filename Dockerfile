@@ -8,10 +8,6 @@ RUN pip install -r requirements.txt
 
 ADD . /app
 
-# New model added. WARNING: Online App update must be synchronized.
-RUN wget https://public.ukp.informatik.tu-darmstadt.de/reimers/sentence-transformers/v0.2/LaBSE.zip --no-verbose -P /tmp/
-RUN unzip /tmp/LaBSE.zip -d /app/model
-
 # Download the list of stopwords from github repository
 RUN wget https://raw.githubusercontent.com/JuvenalDuarte/portuguese_stopwords/main/stopwords.txt --no-verbose -P /app/cfg
 
